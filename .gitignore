@@ -1,0 +1,12 @@
+# 运行时数据：数据库、会话密钥、上传的图片
+data/
+
+# 依赖（本项目没有任何第三方依赖，这行只是防止误提交）
+node_modules/
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

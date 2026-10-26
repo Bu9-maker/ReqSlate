@@ -1,0 +1,26 @@
+services:
+  reqslate:
+    build: .
+    image: reqslate:latest
+    container_name: reqslate
+    restart: unless-stopped
+    ports:
+      # 左边是宿主机端口，改这一个就能换访问端口，比如 "8080:3000"
+      - "3000:3000"
+    volumes:
+      # 数据都在这里：board.db + .secret + uploads/，备份只需拷这个目录
+      - ./data:/data
+      # 界面名称与文案：改完这个文件刷新页面即可生效，不用重新构建镜像
+      - ./config.json:/app/config.json:ro
+    environment:
+      TZ: Asia/Shanghai
+      # 管理密码：改成你自己的，别用默认值
+      ADMIN_PASSWORD: "change-me-please"
+      # 只允许本机反代访问时，可改为 127.0.0.1
+      HOST: "0.0.0.0"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -1,0 +1,6 @@
+# 构建上下文里不需要的东西（Dockerfile 只 COPY 运行必需的文件）
+node_modules
+data
+docs
+*.md
+.git

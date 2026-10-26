@@ -1,0 +1,10 @@
+# 统一换行符，避免 Windows 上提交后 shell 脚本被改成 CRLF 而无法执行
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh text eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.db binary

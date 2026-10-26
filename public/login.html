@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap narrow">
+  <div class="card login-card">
+    <h1 id="appname"></h1>
+    <p class="hint" id="hint"></p>
+    <label class="f">
+      <span>密码</span>
+      <input type="password" id="pw" autocomplete="current-password" placeholder="请输入管理密码">
+    </label>
+    <button class="btn primary" id="go" style="width:100%">进入</button>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="foot">
+    <div id="foot"></div>
+    <div id="footsub" class="footsub"></div>
+  </div>
+</div>
+<script>
+const pw = document.getElementById('pw');
+const err = document.getElementById('err');
+const go = document.getElementById('go');
+
+async function boot() {
+  let cfg = { appName: 'ReqSlate', loginHint: '请输入管理密码', footerText: 'ReqSlate', footerSub: 'designed by zhouwh', titleSeparator: ' · ', overviewTitle: '项目总览' };
+  try {
+    const r = await fetch('/api/config');
+    if (r.ok) cfg = { ...cfg, ...(await r.json()) };
+  } catch {}
+  document.title = '登录 · ' + cfg.appName;
+  document.getElementById('appname').textContent = cfg.appName + cfg.titleSeparator + cfg.overviewTitle;
+  document.getElementById('hint').textContent = cfg.loginHint;
+  document.getElementById('foot').textContent = cfg.footerText;
+  document.getElementById('footsub').textContent = cfg.footerSub || '';
+  pw.focus();
+}
+
+async function submit() {
+  err.textContent = '';
+  go.disabled = true;
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw.value })
+    });
+    const j = await r.json();
+    if (!r.ok) { err.textContent = j.error || '登录失败'; return; }
+    location.href = '/';
+  } catch (e) {
+    err.textContent = '网络错误：' + e.message;
+  } finally {
+    go.disabled = false;
+  }
+}
+
+go.addEventListener('click', submit);
+pw.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+
+boot();
+</script>
+</body>
+</html>

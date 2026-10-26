@@ -1,0 +1,9 @@
+{
+  "appName": "ReqSlate",
+  "overviewTitle": "项目总览",
+  "boardTitle": "工作任务清单",
+  "titleSeparator": " · ",
+  "footerText": "ReqSlate",
+  "footerSub": "designed by zhouwh",
+  "loginHint": "请输入管理密码"
+}

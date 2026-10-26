@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工作任务清单</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="inner">
+    <h1 id="ptitle"></h1>
+    <div class="spacer"></div>
+    <span class="who" id="presence" title="当前在这个页面里的人"></span>
+    <span class="sub" id="whoami"></span>
+    <button class="btn sm ghost" id="setName">署名</button>
+  </div>
+</div>
+
+<div class="signbar-wrap">
+  <div class="signbar" id="signbar" style="display:none">
+    <span>请填写你的名字，之后每次修改都会记在这个名字下：</span>
+    <input type="text" id="signname" placeholder="请输入姓名" maxlength="20">
+    <button class="btn primary sm" id="signsave">确定</button>
+  </div>
+</div>
+
+<div class="layout">
+
+  <aside class="sidenav">
+    <div class="navhead">
+      <span>目录</span>
+      <span class="navtools">
+        <button class="linkbtn" id="expandAll">全部展开</button>
+        <span class="dot-sep">·</span>
+        <button class="linkbtn" id="collapseAll">全部收起</button>
+      </span>
+    </div>
+    <div class="navlist" id="navlist"></div>
+    <button class="navaddlast" id="navAddGrp" title="新建一个分类，排在已完成分类之前">＋ 新建分类</button>
+  </aside>
+
+  <main class="main">
+
+    <div class="summary" id="summary"></div>
+
+    <div class="toolbar">
+      <h2 id="boardTitle">工作任务清单</h2>
+      <div class="spacer"></div>
+      <input type="text" id="f-q" placeholder="请输入关键词">
+      <select id="f-owner" class="w140" title="只看某个负责人的任务"></select>
+      <button class="btn sm ghost" id="f-today" title="只看今天有变动的任务">今日有变动</button>
+      <div class="xport">
+        <button class="btn sm ghost" id="xportBtn" title="导入导出">导入导出 ▾</button>
+        <div class="xpmenu" id="xportMenu" hidden>
+          <button type="button" data-xp="xlsx">导出 Excel</button>
+          <button type="button" data-xp="csv">导出 CSV</button>
+          <div class="xpsep"></div>
+          <button type="button" data-xp="md">导出 Markdown</button>
+          <button type="button" data-xp="jsonl">导出 JSONL</button>
+          <div class="xpsep"></div>
+          <button type="button" data-xp="tpl">下载导入模板</button>
+          <button type="button" data-xp="import">从表格导入</button>
+        </div>
+      </div>
+      <button class="btn primary sm" id="addItem">＋ 新增任务</button>
+    </div>
+
+    <div class="addpanel" id="addpanel" style="display:none">
+      <div class="row">
+        <select id="a-grp" class="w180" aria-label="所属分类"></select>
+        <input type="text" id="a-grp-new" class="w180" placeholder="输入新分类名称" maxlength="40" style="display:none">
+        <input type="text" id="a-title" class="grow" placeholder="请输入任务内容" maxlength="200">
+        <button class="btn primary sm" id="a-save">确定</button>
+        <button class="btn ghost sm" id="a-cancel">取消</button>
+      </div>
+    </div>
+
+    <div class="items" id="items"></div>
+
+    <div class="foot">
+      <div id="foot"></div>
+      <div id="footsub" class="footsub"></div>
+    </div>
+  </main>
+
+  <div class="navghost" aria-hidden="true"></div>
+</div>
+
+<button class="totop" id="toTop" title="回到顶部">↑</button>
+
+<!-- 日期选择器 -->
+<div class="dpicker" id="dpicker" hidden>
+  <div class="dphead">
+    <button class="dpnav" type="button" data-dp="prev" title="上个月">‹</button>
+    <span class="dptitle" id="dp-ym"></span>
+    <button class="dpnav" type="button" data-dp="next" title="下个月">›</button>
+  </div>
+  <div class="dpweek"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
+  <div class="dpgrid" id="dp-grid"></div>
+  <div class="dpfoot">
+    <button class="linkbtn" type="button" data-dp="today">今天</button>
+    <button class="linkbtn" type="button" data-dp="clear">清除</button>
+  </div>
+</div>
+
+<!-- 图片放大 -->
+<div class="lightbox" id="lightbox">
+  <img id="lbimg" alt="">
+</div>
+
+<!-- 从表格导入 -->
+<div class="modal" id="impModal" hidden>
+  <div class="mbox">
+    <div class="mhead">
+      <h3>从表格导入任务</h3>
+      <button class="mclose" id="impClose" type="button" title="关闭">×</button>
+    </div>
+    <div class="mbody">
+      <p class="mhint">支持 Excel（.xlsx）和 CSV 文件。表头要和导入模板一致，最少要有「任务内容」这一列。
+        不确定格式就先去 <button class="linkbtn" type="button" data-xp="tpl">下载导入模板</button>。</p>
+
+      <label class="dropzone" id="impDrop">
+        <input type="file" id="impFile" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+        <span class="dzicon" aria-hidden="true">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+          </svg>
+        </span>
+        <span class="dztext" id="impPick">点击选择文件，或把文件拖到这里</span>
+      </label>
+
+      <div class="mopt">
+        <label><input type="radio" name="impmode" value="append" checked> 追加到现有任务后面</label>
+        <label><input type="radio" name="impmode" value="replace"> 清空现有任务再导入（覆盖）</label>
+      </div>
+      <p class="mwarn" id="impReplaceWarn" hidden>覆盖会把当前项目里的任务、分类和变更记录全部删掉，只保留表格里的内容，且无法撤销。</p>
+
+      <div class="mres" id="impRes" hidden></div>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost sm" id="impCancel" type="button">取消</button>
+      <button class="btn primary sm" id="impGo" type="button" disabled>开始导入</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
