@@ -30,6 +30,7 @@ ReqSlate 就做这一件事。它长得像一张表，用起来比 Excel 少一�
 - [接口](#接口)
 - [设计取舍](#设计取舍)
 - [已知边界](#已知边界)
+- [开发](#开发)
 
 ---
 
@@ -107,6 +108,19 @@ ADMIN_PASSWORD=你的密码 PORT=3000 node server.js
 Windows 双击 `start.bat`，Linux/macOS 跑 `./start.sh`（两者都会先自检 Node 版本）。
 
 **没有任何第三方依赖**——不用 `npm install`，不用装数据库，不用编译原生模块。把目录拷过去就能跑，x86 和 ARM、Windows 和 Linux 之间可以直接拷。
+
+### 下载现成的版本
+
+不想自己 clone 的话，去 [Releases](https://github.com/Bu9-maker/ReqSlate/releases) 下载 `ReqSlate-x.y.z.zip`，解压后 `./start.sh` 或 `start.bat` 直接跑。每个版本都附了 sha256，可以校验下载是否完整。
+
+镜像也发布在 `ghcr.io/bu9-maker/reqslate`，同一个标签里同时有 amd64 和 arm64，docker 会按机器架构自动挑：
+
+```bash
+docker run -d --name reqslate -p 3000:3000 \
+  -v reqslate-data:/data \
+  -e ADMIN_PASSWORD=换成你自己的密码 \
+  ghcr.io/bu9-maker/reqslate:1.0.0
+```
 
 ---
 
@@ -258,7 +272,13 @@ ReqSlate/
 ├── config.json            # 界面文案
 ├── README.md              # 本文件
 ├── 使用手册.md            # 日常用法与部署细节
+├── CHANGELOG.md           # 每个版本改了什么
 ├── docs/                  # 本文件引用的截图
+├── .github/
+│   ├── smoke.mjs          # 冒烟测试（65 项断言，本地和 CI 都跑这一份）
+│   └── workflows/
+│       ├── ci.yml         # 每次推送跑语法检查 + 冒烟测试 + Docker 构建
+│       └── release.yml    # 打 tag 时自动打包、推镜像、建 Release
 ├── public/
 │   ├── login.html         # 管理密码登录页
 │   ├── index.html         # 项目总览
@@ -337,6 +357,44 @@ ReqSlate/
 - 在线人数只在内存里，服务重启就清空。
 - 登录限流按单个 IP 记，同一 NAT 后面的人会互相连累（正常用碰不到）。
 - 导入上限 5000 行 / 8MB；导出「变更历史」最多 5000 条，Markdown 里的变更最多 300 条。
+
+---
+
+## 开发
+
+改完代码想确认没改坏，不用起浏览器，跑一遍冒烟测试就行：
+
+```bash
+ADMIN_PASSWORD=ci-pass PORT=3000 node server.js &
+ADMIN_PASSWORD=ci-pass node .github/smoke.mjs
+```
+
+它用真的 HTTP 请求走一遍：登录、建项目、建分类、建任务、改字段、冲突检测、完成锁定、
+四种导出、导入、在线状态、以及一批异常输入（畸形 JSON、不存在的日期、畸形 Host）。
+65 项断言，跑完大约 3 秒。
+
+推送到 GitHub 后 CI 会自动跑同一份脚本，另外还检查：
+
+- `node --check` 三个 JS 文件
+- `config.json` 是合法 JSON
+- **没有引入第三方依赖**（有人误加 `require('lodash')` 会红）
+- 在 Node 22.5 和 24 上各跑一遍（22.5 是文档写的最低版本）
+- Docker 镜像能构建、容器健康检查能过、镜像里跑一遍冒烟测试
+
+### 发布新版本
+
+1. 在 [CHANGELOG.md](CHANGELOG.md) 里加一节 `## [x.y.z] — 日期`
+2. 打 tag 并推送：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Release 工作流会自动：跑测试 → 打一个解压即用的 zip → 构建 amd64/arm64 镜像推到 ghcr.io →
+创建 Release 并把 zip 和 sha256 挂上去，正文从 CHANGELOG 里取。
+
+如果 CHANGELOG 里没有对应版本，工作流会直接失败，避免发出去一个没有说明的版本。
 
 ---
 

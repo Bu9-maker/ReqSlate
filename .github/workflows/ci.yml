@@ -1,0 +1,196 @@
+name: CI
+
+# 什么时候跑：
+#   - 推送到 main 或任何分支
+#   - 有人提 PR 到 main
+#   - 手动在 Actions 页面点「Run workflow」
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一个分支连推多次时，取消上一次还没跑完的，省额度也省等待
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # 第一关：语法检查。最便宜的检查放最前面，语法错了就不用起服务了。
+  # ------------------------------------------------------------------
+  syntax:
+    name: 语法检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 打印 Node 版本
+        run: node --version
+
+      - name: 检查 server.js / xlsx.js / app.js 的语法
+        run: |
+          node --check server.js
+          node --check xlsx.js
+          node --check public/app.js
+          node --check .github/smoke.mjs
+
+      - name: 检查 config.json 是合法 JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('config.json','utf8')); console.log('config.json OK')"
+
+      - name: 确认没有引入第三方依赖
+        run: |
+          # 本项目的卖点就是零依赖。有人不小心 require 了外部包，这里会红。
+          node -e '
+            const fs = require("fs");
+            if (fs.existsSync("package.json")) {
+              console.error("::error::仓库里不应该出现 package.json");
+              process.exit(1);
+            }
+            const files = ["server.js", "xlsx.js"];
+            const bad = [];
+            for (const f of files) {
+              const src = fs.readFileSync(f, "utf8");
+              for (const m of src.matchAll(/require\((["\x27])([^"\x27]+)\1\)/g)) {
+                const name = m[2];
+                if (!/^(node:|\.{1,2}\/)/.test(name)) bad.push(f + " -> " + name);
+              }
+            }
+            if (bad.length) {
+              console.error("::error::发现非内置依赖：" + bad.join(", "));
+              process.exit(1);
+            }
+            console.log("零依赖检查通过");
+          '
+
+  # ------------------------------------------------------------------
+  # 第二关：起服务跑冒烟测试。真发 HTTP 请求，覆盖登录、增删改查、
+  # 冲突检测、四种导出、导入、在线状态、异常输入。
+  # ------------------------------------------------------------------
+  smoke:
+    name: 冒烟测试
+    runs-on: ubuntu-latest
+    needs: syntax
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.5 是 README 写的最低版本，24 是推荐版本。两个都跑，
+        # 免得「低版本能跑高版本崩」这种问题发到用户手上才发现。
+        node: ['22.5', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 打印环境
+        run: |
+          node --version
+          echo "DATA_DIR=$RUNNER_TEMP/data" >> "$GITHUB_ENV"
+
+      - name: 启动服务
+        env:
+          PORT: '3000'
+          HOST: '127.0.0.1'
+          DATA_DIR: ${{ runner.temp }}/data
+          ADMIN_PASSWORD: ci-pass
+        run: |
+          node server.js > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+
+          # 最多等 30 秒，每 0.5 秒探一次
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/healthz > /dev/null 2>&1; then
+              echo "服务已就绪（第 $i 次探测）"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "::error::服务在 30 秒内没有起来"
+          cat "$RUNNER_TEMP/server.log"
+          exit 1
+
+      - name: 跑冒烟测试
+        env:
+          BASE: http://127.0.0.1:3000
+          ADMIN_PASSWORD: ci-pass
+        run: node .github/smoke.mjs
+
+      - name: 服务日志（失败时才看）
+        if: failure()
+        run: |
+          echo '--- server.log ---'
+          cat "$RUNNER_TEMP/server.log" || true
+
+      - name: 停服务
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/server.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/server.pid")" 2>/dev/null || true
+          fi
+
+  # ------------------------------------------------------------------
+  # 第三关：Docker 镜像能不能构建出来、起来后健康检查过不过。
+  # 这一关慢（要拉基础镜像），但能挡住「Dockerfile 漏拷文件」这类事故
+  # —— 之前就漏拷过 xlsx.js，容器能启动但导出功能全废。
+  # ------------------------------------------------------------------
+  docker:
+    name: Docker 镜像
+    runs-on: ubuntu-latest
+    needs: syntax
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 构建镜像
+        run: docker build -t reqslate:ci .
+
+      - name: 起容器
+        run: |
+          docker run -d --name reqslate-ci \
+            -p 3000:3000 \
+            -e ADMIN_PASSWORD=ci-pass \
+            reqslate:ci
+
+      - name: 等健康检查变成 healthy
+        run: |
+          for i in $(seq 1 40); do
+            STATUS=$(docker inspect --format '{{.State.Health.Status}}' reqslate-ci 2>/dev/null || echo unknown)
+            echo "第 $i 次：$STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "容器健康"
+              exit 0
+            fi
+            if [ "$STATUS" = "unhealthy" ]; then
+              echo "::error::容器不健康"
+              docker logs reqslate-ci
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "::error::容器在 120 秒内没有变成 healthy"
+          docker logs reqslate-ci
+          exit 1
+
+      - name: 容器里跑一遍冒烟测试（确认镜像内容完整）
+        env:
+          BASE: http://127.0.0.1:3000
+          ADMIN_PASSWORD: ci-pass
+        run: node .github/smoke.mjs
+
+      - name: 容器日志（失败时才看）
+        if: failure()
+        run: docker logs reqslate-ci || true
+
+      - name: 清理
+        if: always()
+        run: docker rm -f reqslate-ci || true

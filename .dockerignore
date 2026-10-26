@@ -4,3 +4,4 @@ data
 docs
 *.md
 .git
+.github

@@ -1,0 +1,286 @@
+name: Release
+
+# 打 tag（形如 v1.0.0）时自动发布：
+#   1. 再跑一遍语法检查和冒烟测试，确保发出去的版本是好的
+#   2. 打一个可以直接拷进内网解压即用的 zip
+#   3. 构建多架构 Docker 镜像并推到 GitHub Packages（ghcr.io）
+#   4. 创建 Release，把 zip 挂上去，正文从 CHANGELOG.md 里取
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（例如 v1.0.0），必须是已经存在的 tag'
+        required: true
+        type: string
+
+permissions:
+  contents: write    # 创建 Release、上传附件
+  packages: write    # 推送镜像到 ghcr.io
+
+env:
+  # 手动触发时用输入的 tag，打 tag 触发时用 ref 名。
+  # 两处都写一遍容易漏，统一放这里。
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  # ------------------------------------------------------------------
+  # 发布前先把关：代码是好的吗？版本号和 CHANGELOG 对得上吗？
+  # ------------------------------------------------------------------
+  verify:
+    name: 发布前检查
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 取版本号
+        id: ver
+        run: |
+          TAG="${{ env.RELEASE_TAG }}"
+          # 只认 v1.2.3 这种形状，避免打成 v1.0 或 v1.0.0-beta 之后
+          # 后面的替换逻辑出意外
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::tag 必须形如 v1.0.0，收到的是：$TAG"
+            exit 1
+          fi
+          echo "tag=$TAG"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: 语法检查
+        run: |
+          node --check server.js
+          node --check xlsx.js
+          node --check public/app.js
+
+      - name: 冒烟测试
+        env:
+          PORT: '3000'
+          HOST: '127.0.0.1'
+          DATA_DIR: ${{ runner.temp }}/data
+          ADMIN_PASSWORD: ci-pass
+          BASE: http://127.0.0.1:3000
+        run: |
+          node server.js > "$RUNNER_TEMP/server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/server.pid"
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/healthz > /dev/null 2>&1 && break
+            sleep 0.5
+          done
+          node .github/smoke.mjs
+          kill "$(cat "$RUNNER_TEMP/server.pid")" 2>/dev/null || true
+
+      - name: 检查 CHANGELOG 里有这个版本
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          if ! grep -q "^## \[$V\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md 里没有 $V 这一节，请先补上再发布"
+            exit 1
+          fi
+          echo "CHANGELOG.md 里有 $V"
+
+  # ------------------------------------------------------------------
+  # 打一个「拷进内网就能跑」的 zip
+  # ------------------------------------------------------------------
+  package:
+    name: 打包
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 组装运行所需的文件
+        run: |
+          V="${{ needs.verify.outputs.version }}"
+          DIR="ReqSlate-$V"
+          mkdir -p "$DIR"
+          # 只放运行真正需要的东西：CI 配置、截图、更新记录都不进去
+          cp server.js xlsx.js config.json "$DIR"/
+          cp -r public "$DIR"/
+          cp start.bat start.sh "$DIR"/
+          cp Dockerfile docker-entrypoint.sh docker-compose.yml .dockerignore "$DIR"/
+          cp README.md 使用手册.md LICENSE "$DIR"/
+          # 换行符：bat 必须是 CRLF，否则 cmd 把多行粘成一行会报错；sh 必须是 LF
+          sed -i 's/$/\r/' "$DIR/start.bat"
+          chmod +x "$DIR/start.sh" "$DIR/docker-entrypoint.sh"
+          echo "--- 包内文件 ---"
+          find "$DIR" -type f | sort
+          zip -r "ReqSlate-$V.zip" "$DIR"
+
+      - name: 验证换行符
+        run: |
+          V="${{ needs.verify.outputs.version }}"
+          if file "ReqSlate-$V/start.bat" | grep -qi crlf; then
+            echo "start.bat 是 CRLF，正确"
+          else
+            echo "::error::start.bat 不是 CRLF，Windows 双击会报错"
+            exit 1
+          fi
+          if file "ReqSlate-$V/start.sh" | grep -qi crlf; then
+            echo "::error::start.sh 变成了 CRLF，Linux 上会报 bad interpreter"
+            exit 1
+          fi
+          echo "start.sh 是 LF，正确"
+
+      - name: 解压后能不能跑起来
+        run: |
+          V="${{ needs.verify.outputs.version }}"
+          cd "ReqSlate-$V"
+          PORT=3000 HOST=127.0.0.1 DATA_DIR="$RUNNER_TEMP/pkgdata" ADMIN_PASSWORD=ci-pass \
+            node server.js > "$RUNNER_TEMP/pkg.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/pkg.pid"
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/healthz > /dev/null 2>&1 && break
+            sleep 0.5
+          done
+          RESULT=$(curl -fsS http://127.0.0.1:3000/healthz)
+          kill "$(cat "$RUNNER_TEMP/pkg.pid")" 2>/dev/null || true
+          if [ "$RESULT" != "ok" ]; then
+            echo "::error::解压后的包起不来"
+            cat "$RUNNER_TEMP/pkg.log"
+            exit 1
+          fi
+          echo "解压后的包能正常启动"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reqslate-zip
+          path: ReqSlate-*.zip
+          retention-days: 7
+
+  # ------------------------------------------------------------------
+  # 构建多架构镜像推到 ghcr.io。
+  # 一次 buildx 构建出 amd64 + arm64 的清单，内网 docker pull 时
+  # 会自动挑对应架构，用户不用自己判断。
+  # ------------------------------------------------------------------
+  image:
+    name: 镜像
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 QEMU（构建 ARM 镜像要用）
+        uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.verify.outputs.version }}
+            ghcr.io/${{ github.repository }}:${{ needs.verify.outputs.version }}-amd64
+            ghcr.io/${{ github.repository }}:${{ needs.verify.outputs.version }}-arm64
+          labels: |
+            org.opencontainers.image.title=ReqSlate
+            org.opencontainers.image.version=${{ needs.verify.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  # ------------------------------------------------------------------
+  # 最后创建 Release，正文取 CHANGELOG 里对应版本那一节
+  # ------------------------------------------------------------------
+  release:
+    name: 发布
+    runs-on: ubuntu-latest
+    needs: [verify, package]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: reqslate-zip
+
+      - name: 从 CHANGELOG 抽出本版本正文
+        run: |
+          V="${{ needs.verify.outputs.version }}"
+          # 抓 "## [V]" 到下一个二级标题之间的内容。
+          # 退出条件是任意 "## "，不是 "## [" —— 否则会把后面的
+          # 「版本号怎么定」和末尾的链接定义一起卷进来。
+          awk -v v="$V" '
+            $0 ~ "^## \\[" v "\\]" { on=1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+
+          # 掐掉头尾的空行
+          sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$RUNNER_TEMP/notes.md"
+
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::error::没能从 CHANGELOG.md 抽出正文"
+            exit 1
+          fi
+
+          {
+            cat "$RUNNER_TEMP/notes.md"
+            echo ""
+            echo "---"
+            echo ""
+            echo "## 怎么用这个版本"
+            echo ""
+            echo "**方式一：解压即用**（需要 Node.js ≥ 22.5）"
+            echo ""
+            echo '下载下面的 `ReqSlate-*.zip`，解压后：'
+            echo ""
+            echo '```'
+            echo 'Linux / macOS   ./start.sh'
+            echo 'Windows         start.bat'
+            echo '```'
+            echo ""
+            echo "**方式二：Docker**"
+            echo ""
+            echo '```bash'
+            echo "docker run -d --name reqslate -p 3000:3000 \\"
+            echo "  -v reqslate-data:/data \\"
+            echo "  -e ADMIN_PASSWORD=换成你自己的密码 \\"
+            echo "  ghcr.io/${{ github.repository }}:$V"
+            echo '```'
+            echo ""
+            echo "同一个标签里同时有 amd64 和 arm64，docker 会按机器架构自动挑，不用手动指定。"
+            echo ""
+            echo "**校验下载的文件没损坏**"
+            echo ""
+            echo '```bash'
+            echo "sha256sum -c ReqSlate-$V.zip.sha256"
+            echo '```'
+          } > "$RUNNER_TEMP/body.md"
+
+          echo "--- Release 正文 ---"
+          cat "$RUNNER_TEMP/body.md"
+          echo "--- 结束 ---"
+
+      - name: 生成校验文件
+        run: |
+          V="${{ needs.verify.outputs.version }}"
+          sha256sum "ReqSlate-$V.zip" > "ReqSlate-$V.zip.sha256"
+          cat "ReqSlate-$V.zip.sha256"
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ReqSlate ${{ needs.verify.outputs.version }}
+          body_path: ${{ runner.temp }}/body.md
+          files: |
+            ReqSlate-*.zip
+            ReqSlate-*.zip.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: false
