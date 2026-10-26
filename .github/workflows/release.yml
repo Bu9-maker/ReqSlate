@@ -33,6 +33,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.ver.outputs.version }}
+      minor: ${{ steps.ver.outputs.minor }}
+      image: ${{ steps.ver.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,6 +54,16 @@ jobs:
           fi
           echo "tag=$TAG"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          # 顺便算个 major.minor（1.0.0 → 1.0），镜像可以同时打这个浮动 tag
+          echo "minor=$(echo "${TAG#v}" | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
+
+          # Docker 镜像名必须全小写，而 github.repository 保留仓库原本的大小写
+          # （本仓库是 Bu9-maker/ReqSlate），直接用会报
+          # "repository name must be lowercase"。Actions 表达式没有 toLower，
+          # 只能在这里转一次，后面 image / release 两个 job 都引用这个输出。
+          IMAGE="ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          echo "镜像名：$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: 语法检查
         run: |
@@ -184,10 +196,12 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          # 只打两个 tag：精确版本和 major.minor。
+          # 不要打 -amd64 / -arm64 之类的后缀 —— 这是一次多架构构建，
+          # 三个 tag 会指向同一个多架构清单，那个后缀就是骗人的。
           tags: |
-            ghcr.io/${{ github.repository }}:${{ needs.verify.outputs.version }}
-            ghcr.io/${{ github.repository }}:${{ needs.verify.outputs.version }}-amd64
-            ghcr.io/${{ github.repository }}:${{ needs.verify.outputs.version }}-arm64
+            ${{ needs.verify.outputs.image }}:${{ needs.verify.outputs.version }}
+            ${{ needs.verify.outputs.image }}:${{ needs.verify.outputs.minor }}
           labels: |
             org.opencontainers.image.title=ReqSlate
             org.opencontainers.image.version=${{ needs.verify.outputs.version }}
@@ -200,7 +214,9 @@ jobs:
   release:
     name: 发布
     runs-on: ubuntu-latest
-    needs: [verify, package]
+    # 也等镜像：正文里写了 docker run 的用法，镜像没推上去就发 Release
+    # 等于给用户一个拉不下来的地址。
+    needs: [verify, package, image]
     steps:
       - uses: actions/checkout@v4
 
@@ -250,7 +266,7 @@ jobs:
             echo "docker run -d --name reqslate -p 3000:3000 \\"
             echo "  -v reqslate-data:/data \\"
             echo "  -e ADMIN_PASSWORD=换成你自己的密码 \\"
-            echo "  ghcr.io/${{ github.repository }}:$V"
+            echo "  ${{ needs.verify.outputs.image }}:$V"
             echo '```'
             echo ""
             echo "同一个标签里同时有 amd64 和 arm64，docker 会按机器架构自动挑，不用手动指定。"
