@@ -3,6 +3,30 @@
 本文件记录每个版本改了什么。格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.0.1] — 2026-10-27
+
+### 修复
+
+- **Node 22.5.x 上新建项目卡死**：这个版本的 `node:sqlite` 有个早期实现缺陷，
+  `get()` 查不到行时返回的是「每一列都是 null 的对象」，而不是文档写的 `undefined`。
+  这个对象在 JavaScript 里是真值，于是「生成一个没被占用的项目 token」那行
+  `while (get(token))` 变成死循环，浏览器一直转圈。同一原因还会让不存在的项目
+  链接返回 500 而不是 404。现在启动时先探一下 `get()` 的实际行为，不对外就自动
+  包一层用 `all()[0]` 实现，Node 22.5 到 24 语义一致。
+  （Node 24 及较新的 22.x 没有这个问题，所以之前只在 24 上测过时没发现。）
+- **Release 工作流的镜像名大小写**：`github.repository` 是 `Bu9-maker/ReqSlate`，
+  Docker 镜像名必须全小写，构建直接失败。改成在 verify 里转小写存成输出。
+- **Release 工作流的多余 tag**：一次多架构构建却打了 `:1.0.0-amd64`、`:1.0.0-arm64`
+  两个 tag，它们指向的是同一个多架构清单，后缀是误导。改为只打 `:1.0.0` 和 `:1.0`。
+- **Release 不等镜像**：正文里写了 `docker run` 的用法，但 Release 不等镜像 job，
+  镜像推失败时用户拿到的地址拉不下来。现在 `release` 的 `needs` 加了 `image`。
+
+### 开发
+
+- 冒烟测试补跑 Node 22.5 真实环境，覆盖到这次的 `get()` 语义差异
+
+---
+
 ## [1.0.0] — 2026-10-27
 
 第一个正式版本。功能已经完整，可以拿去内网部署。
@@ -64,4 +88,5 @@
 - **次版本号**：加了新功能，老数据能直接用
 - **修订号**：只修 bug，不改行为
 
+[1.0.1]: https://github.com/Bu9-maker/ReqSlate/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Bu9-maker/ReqSlate/releases/tag/v1.0.0

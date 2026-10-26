@@ -132,6 +132,31 @@ const todayStr = () => now().slice(0, 10);
 
 const db = new DatabaseSync(path.join(DATA_DIR, 'board.db'));
 
+/* Node 22.5.x 的 node:sqlite 有个早期实现缺陷：get() 查不到行时返回的是
+   「每一列都是 null 的对象」，而不是文档写的 undefined。这个对象是真值，
+   于是 `if (!row)` 永远不成立、`while (db.prepare(...).get(x))` 会死循环。
+   （22.5 之后某个小版本改对了，24 上也正常。）
+
+   与其在启动时判断版本号——版本号是间接指标，将来还会变——不如直接问一句
+   「查不到行时你返回什么」，就地判断，然后把 prepare 包一层，
+   用 all()[0] 实现 get()。all() 在两边都稳定返回空数组。 */
+(function patchSqliteGet() {
+  const probe = db.prepare('SELECT 1 AS x WHERE 0');
+  if (probe.get() === undefined) return;   // 行为正确，什么都不做
+
+  const rawPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    const st = rawPrepare(sql);
+    return {
+      run: (...a) => st.run(...a),
+      all: (...a) => st.all(...a),
+      // 空数组取 [0] 就是 undefined，和有缺陷的版本之外的语义一致
+      get: (...a) => st.all(...a)[0]
+    };
+  };
+  console.log('[compat] 当前 Node ' + process.version + ' 的 node:sqlite 无行时返回空对象，已自动修正 get() 语义');
+})();
+
 db.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA foreign_keys = ON;

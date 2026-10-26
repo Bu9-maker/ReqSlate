@@ -16,6 +16,13 @@ import http from 'node:http';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:3000';
 const PASSWORD = process.env.ADMIN_PASSWORD || 'ci-pass';
+/* 单个请求最多等 10 秒。正常请求都在毫秒级，超过这个数一定是服务端卡住了，
+   早点报错比让 CI 干等好定位。 */
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 10000);
+/* 连续这么多次请求都没响应，说明服务不是偶发慢，而是整体卡住了。
+   继续往下跑只会一项项等超时（65 项 × 10 秒 = 11 分钟），不如立刻收工。 */
+const MAX_CONSECUTIVE_TIMEOUTS = 3;
+let consecutiveTimeouts = 0;
 
 let passed = 0;
 const failures = [];
@@ -38,12 +45,34 @@ async function call(method, path, { body, cookie } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (cookie) headers.Cookie = cookie;
-  const res = await fetch(BASE + path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    redirect: 'manual'
-  });
+  /* 必须带超时。没有超时时，服务端一旦死循环（真发生过：Node 22.5 的
+     node:sqlite 让 while(get(token)) 转不停），这里会一直挂着，
+     CI 只能等 GitHub 的默认超时才发现，报错信息还完全指不到位置。 */
+  let res;
+  try {
+    res = await fetch(BASE + path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    });
+  } catch (e) {
+    /* 超时 / 连接被重置都当成「状态 0」返回，让调用处的 ok() 报出来，
+       而不是让整个脚本崩掉——崩掉的话前面跑了多少项都看不到。
+       把原因塞进 text，断言失败时的 detail 会把它带出来。 */
+    const why = e.name === 'TimeoutError' || e.name === 'AbortError'
+      ? `请求超过 ${REQUEST_TIMEOUT_MS}ms 没响应`
+      : e.message;
+    if (++consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
+      console.log(`\n连续 ${consecutiveTimeouts} 次请求没响应，服务应该是整体卡住了。`);
+      console.log(`最后一次：${method} ${path} —— ${why}`);
+      console.log('先看看服务进程还在不在，再翻服务日志。');
+      process.exit(1);
+    }
+    return { status: 0, buf: Buffer.alloc(0), text: why, json: null, headers: new Headers() };
+  }
+  consecutiveTimeouts = 0;
   const buf = Buffer.from(await res.arrayBuffer());
   const text = buf.toString('utf8');
   let json = null;

@@ -119,7 +119,7 @@ Windows 双击 `start.bat`，Linux/macOS 跑 `./start.sh`（两者都会先自�
 docker run -d --name reqslate -p 3000:3000 \
   -v reqslate-data:/data \
   -e ADMIN_PASSWORD=换成你自己的密码 \
-  ghcr.io/bu9-maker/reqslate:1.0.0
+  ghcr.io/bu9-maker/reqslate:1.0.1
 ```
 
 ---
@@ -387,8 +387,8 @@ ADMIN_PASSWORD=ci-pass node .github/smoke.mjs
 2. 打 tag 并推送：
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 Release 工作流会自动：跑测试 → 打一个解压即用的 zip → 构建 amd64/arm64 镜像推到 ghcr.io →

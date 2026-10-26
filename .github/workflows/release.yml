@@ -236,8 +236,18 @@ jobs:
             on { print }
           ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
 
-          # 掐掉头尾的空行
+          # 掐掉头尾的空行，以及末尾的分隔线 —— CHANGELOG 里各版本之间用
+          # "---" 隔开，抽取时会被一起带出来，正文自己还会再加一条，
+          # 两条叠在一起很难看。
           sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$RUNNER_TEMP/notes.md"
+          while [ "$(tail -n1 "$RUNNER_TEMP/notes.md")" = "---" ]; do
+            sed -i '$d' "$RUNNER_TEMP/notes.md"
+            sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$RUNNER_TEMP/notes.md"
+          done
+          # 开头的空行也去掉（第一个版本没有，后面每个都有）
+          while [ -z "$(head -n1 "$RUNNER_TEMP/notes.md")" ]; do
+            sed -i '1d' "$RUNNER_TEMP/notes.md"
+          done
 
           if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
             echo "::error::没能从 CHANGELOG.md 抽出正文"
