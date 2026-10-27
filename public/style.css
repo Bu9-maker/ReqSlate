@@ -357,16 +357,7 @@ textarea { resize: vertical; min-height: 78px; }
 .navitem.active { color: var(--brand); font-weight: 600; }
 .navitem.active .nseq { color: var(--brand); }
 
-/* 今日有变动小圆点 */
-.ndot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--warn);
-  margin-top: 7px;
-}
-.ndot.ghost { background: transparent; }
+/* 目录里的小圆点已随「今日有变动」一并去掉 */
 
 /* 目录底部兜底：新建分类 */
 .navaddlast {
@@ -441,11 +432,56 @@ textarea { resize: vertical; min-height: 78px; }
 /* 选了具体负责人时按钮变蓝，提醒「现在不是看全部」 */
 .toolbar select.on { border-color: var(--brand); color: var(--brand); font-weight: 600; background: var(--brand-soft); }
 
-#f-today.on {
-  background: var(--warn-bg);
-  color: var(--warn);
-  border-color: #f2ddb8;
+/* 修改时间筛选：按钮 + 弹出面板。和导入导出菜单同一套做法，
+   绝对定位挂在按钮下面，点别处收起。 */
+.dfilter { position: relative; flex: none; }
+.dfilter .btn.on {
+  background: var(--brand-soft);
+  color: var(--brand);
+  border-color: var(--brand);
   font-weight: 600;
+}
+.dfmenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 5px);
+  z-index: 120;
+  width: 236px;
+  padding: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(20, 28, 44, .14);
+}
+.dfmenu[hidden] { display: none; }
+.dfmenu .dfhead {
+  font-size: 12px;
+  color: var(--ink-3);
+  padding: 0 2px 7px;
+}
+.dfmenu .dfrow { display: flex; align-items: center; gap: 2px; margin-bottom: 6px; }
+.dfmenu .dfin {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font-family: inherit;
+}
+.dfmenu .dfin:focus { outline: none; border-color: var(--brand); }
+.dfmenu .dfacts { display: flex; justify-content: flex-end; padding-top: 2px; }
+
+/* 任务里显示的「最后修改」时刻 */
+.item .modtime {
+  font-size: 13px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .2px;
+  padding: 5px 0 0;
 }
 
 .items { display: flex; flex-direction: column; gap: 10px; }

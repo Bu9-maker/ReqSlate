@@ -43,7 +43,8 @@ let state = {
   today: '',
   stats: { total: 0, todo: 0, doing: 0, done: 0, overdue: 0 },
   filter: 'all',
-  todayOnly: false,
+  modFrom: '',         // 最后修改时间的起止，空串=不限；都是 YYYY-MM-DD
+  modTo: '',
   owner: ''            // 只看某个负责人，空串=不限
 };
 
@@ -247,8 +248,26 @@ function isOverdue(it) {
   return it.status !== 'done' && !!it.due && it.due < today();
 }
 
+/* 最后修改时间（updatedAt，形如 2026-10-27 23:04:12）落在 [modFrom, modTo] 之内。
+   两端都含：选「10-01 到 10-31」时，10-31 当天 23:59 改的也要算进来，
+   所以只比日期部分，不比时刻。任一端留空就是不限那一端。 */
+function inModRange(it) {
+  const from = state.modFrom;
+  const to = state.modTo;
+  if (!from && !to) return true;
+  const day = String(it.updatedAt || '').slice(0, 10);
+  if (!day) return false;
+  if (from && day < from) return false;
+  if (to && day > to) return false;
+  return true;
+}
+
+function hasModFilter() {
+  return !!(state.modFrom || state.modTo);
+}
+
 function matchFilter(it) {
-  if (state.todayOnly && !it.changedToday) return false;
+  if (!inModRange(it)) return false;
   if (state.owner && (it.owner || '').trim() !== state.owner) return false;
   const f = state.filter;
   if (!f || f === 'all') return true;
@@ -317,10 +336,14 @@ function groupLabel(nameOrGroup) {
 
 function badgesHTML(it) {
   const od = isOverdue(it);
-  return [
-    od ? '<span class="badge overdue">逾期</span>' : '',
-    it.changedToday ? '<span class="badge changed">今日有变动</span>' : ''
-  ].join('');
+  return od ? '<span class="badge overdue">逾期</span>' : '';
+}
+
+/* 最后修改时间：库里存的是 2026-10-27 23:04:12，界面上只显示到分钟，
+   秒对人没有意义。创建时它就是创建时间（后端 insert 用的是同一个 ts）。 */
+function modTimeText(it) {
+  const s = String(it.updatedAt || '');
+  return s ? s.slice(0, 16) : '';
 }
 
 function historyHTML(it) {
@@ -463,6 +486,12 @@ function itemHTML(it) {
               <label class="flabel">所属分类</label>
               <div class="fval">${grpSelect(it, dis)}</div>
             </div>
+            <div class="fblock">
+              <label class="flabel">最后修改</label>
+              <div class="fval">
+                <span class="modtime" data-mod="${it.id}" title="这条任务最后一次变动的时间；新建时等于创建时间">${esc(modTimeText(it) || '—')}</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -523,7 +552,7 @@ function renderItems() {
 
   const box = $('#items');
   const keep = new Set(list.map((x) => x.id));
-  const plain = !q && !state.todayOnly && !state.owner && (state.filter === 'all' || !state.filter);
+  const plain = !q && !hasModFilter() && !state.owner && (state.filter === 'all' || !state.filter);
 
   const groups = buildGroups()
     .map((g) => ({ ...g, items: g.items.filter((x) => keep.has(x.id)) }))
@@ -590,7 +619,6 @@ function renderNav(groups) {
     const collapsed = navCollapsed.has(g.name);
     const kids = g.items.map((it) => `
       <div class="navitem st-${it.status} ${activeItemId === it.id ? 'active' : ''}" data-jump="it-${it.id}" data-nid="${it.id}" title="${esc(it.title)}" role="button" tabindex="0">
-        ${it.changedToday ? '<span class="ndot" title="今日有变动"></span>' : '<span class="ndot ghost"></span>'}
         <span class="nseq">${it.seq}</span><span class="ntxt">${esc(it.title || '（未填内容）')}</span>
         <span class="navacts">
           <button class="navicon navdel" data-navdelitem="${it.id}" title="删除这条任务" aria-label="删除这条任务">${ICON.del}</button>
@@ -1191,12 +1219,15 @@ function fileToDataURL(file) {
    立刻被筛掉，界面上什么都看不到，像没建成功一样。
    清完还要把「任务总数」这张卡片重新点亮（filter 回到 all）。 */
 function clearFilters() {
-  const had = state.filter !== 'all' || state.todayOnly || state.owner || ($('#f-q').value || '').trim();
+  const had = state.filter !== 'all' || hasModFilter() || state.owner || ($('#f-q').value || '').trim();
   state.filter = 'all';
-  state.todayOnly = false;
+  state.modFrom = '';
+  state.modTo = '';
   state.owner = '';
   $('#f-q').value = '';
-  $('#f-today').classList.remove('on');
+  $('#f-mod-from').value = '';
+  $('#f-mod-to').value = '';
+  syncModFilterUI();
   const sel = $('#f-owner');
   if (sel) { sel._sig = ''; renderOwnerFilter(); }
   renderSummary();
@@ -1488,8 +1519,8 @@ async function saveField(id, field, value, oldValue) {
 
     if (r.changed > 0 && Array.isArray(r.history)) {
       cur.history = r.history;
-      cur.changedToday = true;
       if (field === 'progress') cur.progressToday = true;
+      if (r.updatedAt) cur.updatedAt = r.updatedAt;
     }
     if (typeof r.rev === 'number') serverRev = r.rev;
 
@@ -1543,12 +1574,9 @@ function refreshItemChrome(it) {
   if (prog) prog.classList.toggle('hit', !!it.progressToday);
   el.classList.toggle('overdue', isOverdue(it));
 
-  // 目录里的「今日有变动」小圆点也要立刻跟上，不必等整页重载
-  const dot = document.querySelector(`.navitem[data-nid="${it.id}"] .ndot`);
-  if (dot) {
-    dot.classList.toggle('ghost', !it.changedToday);
-    dot.title = it.changedToday ? '今日有变动' : '';
-  }
+  // 最后修改时间也要立刻跟上，不必等整页重载
+  const mt = el.querySelector('.modtime');
+  if (mt) mt.textContent = modTimeText(it) || '—';
 }
 
 /* ---------------- 顶部新增任务：弹表单，分类名与任务内容都预填 ---------------- */
@@ -1840,11 +1868,81 @@ $('#collapseAll').addEventListener('click', () => {
   renderItems();
 });
 
-/* ---------------- 今日有变动筛选 ---------------- */
+/* ---------------- 最后修改时间筛选 ---------------- */
 
-$('#f-today').addEventListener('click', () => {
-  state.todayOnly = !state.todayOnly;
-  $('#f-today').classList.toggle('on', state.todayOnly);
+const dfMenu = $('#dfmenu');
+
+/* 按钮和两个输入框都按 state 重画一遍。用 state 当唯一真相，
+   免得输入框里的字和实际生效的条件对不上（比如日期非法被拒之后）。 */
+function syncModFilterUI() {
+  const from = $('#f-mod-from');
+  const to = $('#f-mod-to');
+  const btn = $('#f-mod');
+  if (from && from.value !== state.modFrom) from.value = state.modFrom;
+  if (to && to.value !== state.modTo) to.value = state.modTo;
+  if (!btn) return;
+
+  const on = hasModFilter();
+  btn.classList.toggle('on', on);
+  if (!on) { btn.textContent = '修改时间'; return; }
+  const f = state.modFrom ? state.modFrom.slice(5) : '不限';
+  const t = state.modTo ? state.modTo.slice(5) : '不限';
+  btn.textContent = `修改时间 ${f} ~ ${t}`;
+}
+
+function applyModFilter() {
+  const f = parseDate($('#f-mod-from').value);
+  const t = parseDate($('#f-mod-to').value);
+  // parseDate 的三种返回：'' 清空、null 非法、'YYYY-MM-DD' 正常
+  // 输入不合法时把框里的字退回去，免得框里写着一个没生效的日期
+  if (f === null) { toast('开始日期格式不对，请写成 2026-10-01'); syncModFilterUI(); return; }
+  if (t === null) { toast('结束日期格式不对，请写成 2026-10-31'); syncModFilterUI(); return; }
+  if (f && t && f > t) { toast('开始日期不能晚于结束日期'); syncModFilterUI(); return; }
+  state.modFrom = f;
+  state.modTo = t;
+  syncModFilterUI();
+  renderItems();
+}
+
+$('#f-mod').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!dfMenu) return;
+  dfMenu.hidden = !dfMenu.hidden;
+  if (!dfMenu.hidden) syncModFilterUI();
+});
+
+/* 点到别处收起菜单。点日期选择器不算「别处」——它是 fixed 定位、挂在 body 上，
+   不排除的话一选日期菜单就跟着关了。 */
+document.addEventListener('mousedown', (e) => {
+  if (!dfMenu || dfMenu.hidden) return;
+  if (dfMenu.contains(e.target)) return;
+  if (e.target.closest && (e.target.closest('#f-mod') || e.target.closest('#dpicker'))) return;
+  dfMenu.hidden = true;
+});
+
+/* 两个日期框：手输 + 日历按钮，改完立刻生效 */
+[['dp-mod-from', '#f-mod-from'], ['dp-mod-to', '#f-mod-to']].forEach(([btnId, sel]) => {
+  const btn = document.getElementById(btnId);
+  const inp = $(sel);
+  if (!btn || !inp) return;
+
+  inp._commit = applyModFilter;          // 日历选完直接提交
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (dp.input === inp) { dpClose(); return; }
+    dpOpen(inp);
+  });
+  inp.addEventListener('blur', applyModFilter);
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+  });
+});
+
+$('#f-mod-clear').addEventListener('click', (e) => {
+  e.stopPropagation();
+  state.modFrom = '';
+  state.modTo = '';
+  syncModFilterUI();
   renderItems();
 });
 

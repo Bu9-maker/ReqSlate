@@ -20,7 +20,7 @@ const PASSWORD = process.env.ADMIN_PASSWORD || 'ci-pass';
    早点报错比让 CI 干等好定位。 */
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 10000);
 /* 连续这么多次请求都没响应，说明服务不是偶发慢，而是整体卡住了。
-   继续往下跑只会一项项等超时（65 项 × 10 秒 = 11 分钟），不如立刻收工。 */
+   继续往下跑只会一项项等超时（72 项 × 10 秒 = 12 分钟），不如立刻收工。 */
 const MAX_CONSECUTIVE_TIMEOUTS = 3;
 let consecutiveTimeouts = 0;
 
@@ -157,6 +157,12 @@ let groupName = '';
     payload.status === 200 && Array.isArray(payload.json?.items) &&
     Array.isArray(payload.json?.groups) && !!payload.json?.stats && payload.json?.rev !== undefined);
 
+  /* 每条任务都要带 updatedAt（界面上叫「最后修改时间」）。
+     少了这个字段，前端的时间筛选就没有依据，会静默地什么都不筛。 */
+  ok('任务都带 updatedAt',
+    payload.json?.items?.every((x) => typeof x.updatedAt === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(x.updatedAt)),
+    `实际 ${JSON.stringify((payload.json?.items || []).map((x) => x.updatedAt))}`);
+
   const g = await call('POST', `/api/p/${token}/groups`, { body: {} });
   ok('新建分类返回自动生成的名称', g.status === 200 && !!g.json?.name);
   groupName = g.json?.name || '';
@@ -204,6 +210,53 @@ section('4. 修改 / 冲突检测 / 完成锁定');
 
   const unlock = await call('PATCH', `/api/p/${token}/items/${itemId}`, { body: { status: 'doing' } });
   ok('已完成的任务可以改回进行中', unlock.status === 200, `实际 ${unlock.status}`);
+}
+
+/* ================= 4b. 最后修改时间 ================= */
+
+section('4b. 最后修改时间');
+{
+  /* 新建时 updated_at 和 created_at 必须是同一个值：界面上「最后修改」要等于创建时间，
+     否则新任务一建出来就显示一个比创建更早/更晚的时刻，看着像出错了。 */
+  const made = await call('POST', `/api/p/${token}/items`, { body: { title: 'CI 时间戳任务', grp: groupName } });
+  const newId = made.json?.id || 0;
+  ok('新建任务返回 id', !!newId, `实际 ${newId}`);
+
+  const snap = await call('GET', `/api/p/${token}`);
+  const fresh = (snap.json?.items || []).find((x) => x.id === newId);
+  ok('新建任务的最后修改时间等于创建时间',
+    !!fresh && fresh.updatedAt === fresh.createdAt,
+    `createdAt=${fresh?.createdAt} updatedAt=${fresh?.updatedAt}`);
+
+  /* 改一个字段，updated_at 必须跟着动；否则筛选「今天改过的」永远筛不出来。
+     两次操作可能落在同一秒，所以不能断言「变大」，只断言「被更新成了合法时刻」。 */
+  await call('PATCH', `/api/p/${token}/items/${newId}`, {
+    body: { progress: '刚改过', base: { progress: '' } }
+  });
+  const after = await call('GET', `/api/p/${token}`);
+  const edited = (after.json?.items || []).find((x) => x.id === newId);
+  ok('改动后最后修改时间是合法时刻',
+    !!edited && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(edited.updatedAt),
+    `实际 ${edited?.updatedAt}`);
+  ok('改动后最后修改时间不早于创建时间',
+    !!edited && edited.updatedAt >= edited.createdAt,
+    `createdAt=${edited?.createdAt} updatedAt=${edited?.updatedAt}`);
+
+  /* 只读接口不该改时间：读一次再读一次，updatedAt 必须原样。 */
+  const again = await call('GET', `/api/p/${token}`);
+  const same = (again.json?.items || []).find((x) => x.id === newId);
+  ok('只读访问不会动最后修改时间', same?.updatedAt === edited?.updatedAt,
+    `${edited?.updatedAt} -> ${same?.updatedAt}`);
+
+  /* PATCH 响应里要回带 updatedAt，前端靠它立刻刷新「最后修改」那一行，
+     不用等下一轮轮询。 */
+  const one = await call('PATCH', `/api/p/${token}/items/${newId}`, {
+    body: { progress: '再改一次', base: { progress: '刚改过' } }
+  });
+  ok('PATCH 响应带回 updatedAt', one.status === 200 && !!one.json?.updatedAt,
+    `实际 ${JSON.stringify(one.json?.updatedAt)}`);
+
+  await call('DELETE', `/api/p/${token}/items/${newId}`);
 }
 
 /* ================= 5. 导出 ================= */

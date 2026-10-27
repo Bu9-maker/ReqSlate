@@ -761,7 +761,7 @@ const deleteImageFile = (projToken, file) => {
 
 /* 导出的列。序号也导出去，人看着方便；导回来时序号不采信，
    一律按分类重新编，免得外部改乱了导致同号。 */
-const XLSX_HEADER = ['分类', '序号', '任务内容', '补充说明', '进展情况', '负责人', '完成期限', '状态', '最后更新'];
+const XLSX_HEADER = ['分类', '序号', '任务内容', '补充说明', '进展情况', '负责人', '完成期限', '状态', '最后修改时间'];
 
 /* 导入时认这些列名（大小写、全半角不管，去空格后比） */
 const IMPORT_COLUMNS = {
@@ -773,7 +773,7 @@ const IMPORT_COLUMNS = {
   owner: ['负责人', '责任人', 'owner'],
   due: ['完成期限', '期限', '截止日期', '截止时间', 'due', 'deadline'],
   status: ['状态', 'status'],
-  updatedAt: ['最后更新', '更新时间', 'updatedat']
+  updatedAt: ['最后修改时间', '最后更新', '修改时间', '更新时间', 'updatedat']
 };
 
 const STATUS_ALIAS = {
@@ -954,7 +954,7 @@ function templateWorkbook() {
         ['负责人', '建议写成「姓名（甲方/乙方）」，方便区分是哪一方', '否'],
         ['完成期限', '写成 2026-11-10 这样。也认 2026/11/10、2026年11月10日、20261110', '否'],
         ['状态', '只能填：未开始 / 进行中 / 已完成。留空按「未开始」处理', '否'],
-        ['最后更新', '导出时自动带上，导入时忽略', '否']
+        ['最后修改时间', '导出时自动带上，导入时忽略。新建任务时它就等于创建时间', '否']
       ],
       widths: [12, 70, 6]
     }
@@ -1196,9 +1196,9 @@ function projectPayload(proj, clientId = '', name = '', bid = '') {
       url: `/uploads/${proj.token}/${g.file}`,
       size: g.size
     }));
-    // 「今日有变动」：今天动过任何字段都算；但「创建」不算，
-    // 否则一天录入十几条，满屏都是标
-    it.changedToday = h.some((x) => x.field !== 'create' && x.at.slice(0, 10) === t);
+    /* 「今天的进展」：今天改过「进展情况」就把这个框标红。
+       只认 progress 字段，改别的字段不算——这是给「今天有没有报进度」看的，
+       不是给「今天动没动过」看的。 */
     it.progressToday = h.some((x) => x.field === 'progress' && x.at.slice(0, 10) === t);
   }
 
