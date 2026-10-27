@@ -24,6 +24,12 @@
   --shadow: 0 1px 2px rgba(20, 28, 44, .05), 0 4px 14px rgba(20, 28, 44, .05);
   --navw: 264px;
   --pagew: 1680px;
+  /* 缓动曲线。CSS 内置的 ease-out 太软，动起来像没动，
+     这几个起步更快、收尾更稳，短动画才看得出「响应」。 */
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
+  --ease-in-out: cubic-bezier(.77, 0, .175, 1);
+  /* 统一按压反馈幅度，按钮、图标按钮都取这一个值 */
+  --press: scale(.97);
 }
 
 /* 始终为滚动条预留位置：内容区从「没有滚动条」变「有滚动条」时，
@@ -147,18 +153,24 @@ textarea { resize: vertical; min-height: 78px; }
   background: #fff;
   cursor: pointer;
   font-size: 14px;
-  transition: background .15s, border-color .15s, opacity .15s;
+  transition: background .15s, border-color .15s, opacity .15s, transform .12s var(--ease-out);
   white-space: nowrap;
 }
-.btn:hover { background: #f7f8fa; }
+/* 鼠标悬停只在真有指针的设备上生效：触屏点一下会先触发 hover，
+   松手后颜色卡住不回弹，看起来像选中了。 */
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover { background: #f7f8fa; }
+  .btn.primary:hover { background: #245edb; }
+  .btn.danger:hover { background: var(--danger-bg); }
+  .btn.ghost:hover { background: #f0f2f6; }
+}
+/* 按下去要立刻有反应，哪怕只是 3% 的缩小 */
+.btn:active { transform: var(--press); }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
 .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
-.btn.primary:hover { background: #245edb; }
 .btn.danger { color: var(--danger); border-color: #f0c9c9; }
-.btn.danger:hover { background: var(--danger-bg); }
 .btn.sm { padding: 5px 11px; font-size: 13px; border-radius: 7px; }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--ink-2); }
-.btn.ghost:hover { background: #f0f2f6; }
 
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .row > .grow { flex: 1; min-width: 160px; }
@@ -432,8 +444,8 @@ textarea { resize: vertical; min-height: 78px; }
 /* 选了具体负责人时按钮变蓝，提醒「现在不是看全部」 */
 .toolbar select.on { border-color: var(--brand); color: var(--brand); font-weight: 600; background: var(--brand-soft); }
 
-/* 修改时间筛选：按钮 + 弹出面板。和导入导出菜单同一套做法，
-   绝对定位挂在按钮下面，点别处收起。 */
+/* 时间筛选：一个按钮 + 一个面板，面板里分「创建时间」「最后修改时间」两块。
+   和导入导出菜单同一套做法，绝对定位挂在按钮下面，点别处收起。 */
 .dfilter { position: relative; flex: none; }
 .dfilter .btn.on {
   background: var(--brand-soft);
@@ -446,20 +458,48 @@ textarea { resize: vertical; min-height: 78px; }
   right: 0;
   top: calc(100% + 5px);
   z-index: 120;
-  width: 236px;
-  padding: 10px;
+  width: 244px;
+  padding: 6px;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: 0 10px 30px rgba(20, 28, 44, .14);
+  /* 从按钮那一角长出来，不是从正中间炸开 */
+  transform-origin: top right;
+  animation: menuIn .13s var(--ease-out);
 }
 .dfmenu[hidden] { display: none; }
+@keyframes menuIn {
+  from { opacity: 0; transform: scale(.97) translateY(-2px); }
+}
+
+/* 两组条件之间留一条浅分隔线：两组结构完全一样，只靠留白容易看串行 */
+.dfsec + .dfsec { margin-top: 2px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 .dfmenu .dfhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 12px;
   color: var(--ink-3);
-  padding: 0 2px 7px;
+  padding: 2px 4px 7px;
 }
-.dfmenu .dfrow { display: flex; align-items: center; gap: 2px; margin-bottom: 6px; }
+/* 「清除」平时不出现，该块有条件时才露出来，省得面板里一直挂着两个清除 */
+.dfmenu .dfx {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.dfmenu .dfx:hover { color: var(--brand); }
+.dfmenu .dfx[hidden] { display: none; }
+.dfmenu .dfx:active { transform: var(--press); }
+
+.dfmenu .dfrow { display: flex; align-items: center; gap: 2px; margin-bottom: 6px; padding: 0 4px; }
 .dfmenu .dfin {
   flex: 1;
   min-width: 0;
@@ -473,9 +513,38 @@ textarea { resize: vertical; min-height: 78px; }
   font-family: inherit;
 }
 .dfmenu .dfin:focus { outline: none; border-color: var(--brand); }
-.dfmenu .dfacts { display: flex; justify-content: flex-end; padding-top: 2px; }
 
-/* 任务里显示的「最后修改」时刻 */
+/* 日历小按钮。原来只有 .item 里的有样式，面板里这两个是裸按钮，
+   在 244px 宽的面板里会跟输入框挤在一起，所以这里补一套。 */
+.dfmenu .dpbtn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+@media (hover: hover) and (pointer: fine) {
+  .dfmenu .dpbtn:hover { border-color: var(--line); background: #fbfcfe; color: var(--brand); }
+}
+.dfmenu .dpbtn:active { transform: scale(.94); }
+.dfmenu .dpacts {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 4px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* 任务里显示的两个时刻：创建时间、最后修改。
+   创建时间不会变，看一眼就过去了，压成次要色；最后修改是判断「这行最近动过没有」的依据，保持正常色。 */
 .item .modtime {
   font-size: 13px;
   color: var(--ink-2);
@@ -483,6 +552,7 @@ textarea { resize: vertical; min-height: 78px; }
   letter-spacing: .2px;
   padding: 5px 0 0;
 }
+.item .modtime.createtime { color: var(--ink-3); }
 
 .items { display: flex; flex-direction: column; gap: 10px; }
 
@@ -503,6 +573,8 @@ textarea { resize: vertical; min-height: 78px; }
   box-shadow: 0 10px 30px rgba(20, 28, 44, .16);
   display: flex;
   flex-direction: column;
+  transform-origin: top right;
+  animation: menuIn .13s var(--ease-out);
 }
 .xpmenu[hidden] { display: none; }
 .xpmenu button {
@@ -1324,4 +1396,38 @@ textarea { resize: vertical; min-height: 78px; }
   .group .gadd { margin-left: 0; }
   .group .gcount { margin-left: 0; }
   .totop { right: 14px; bottom: 16px; width: 36px; height: 36px; }
+}
+
+/* ================= 可访问性 ================= */
+
+/* 输入框都写了 outline: none，键盘 Tab 过来就只剩一圈浅色描边，看不清落在哪。
+   鼠标点击不要这圈，只有键盘操作才给。 */
+.btn:focus-visible,
+.linkbtn:focus-visible,
+.caret:focus-visible,
+.navicon:focus-visible,
+.navitem:focus-visible,
+.navgrp:focus-visible,
+.totop:focus-visible,
+.dfmenu .dfx:focus-visible,
+.xpmenu button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* 系统开了「减少动态效果」时，去掉位移和缩放，只留颜色、透明度的变化：
+   这些是帮助理解状态的，去掉反而更难用。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .btn:active,
+  .dfmenu .dpbtn:active,
+  .dfmenu .dfx:active { transform: none; }
 }

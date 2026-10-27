@@ -52,25 +52,44 @@
       <input type="text" id="f-q" placeholder="请输入关键词">
       <select id="f-owner" class="w140" title="只看某个负责人的任务"></select>
       <div class="dfilter" id="dfilter">
-        <button class="btn sm ghost" id="f-mod" title="按最后修改时间筛选">修改时间</button>
-        <div class="dfmenu" id="dfmenu" hidden>
-          <div class="dfhead">按最后修改时间筛选</div>
-          <div class="dfrow">
-            <input type="text" id="f-mod-from" class="dfin" placeholder="开始日期" maxlength="12" autocomplete="off">
-            <button class="dpbtn" type="button" id="dp-mod-from" data-dp-open="mod-from" title="选择开始日期" aria-label="选择开始日期">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
-                stroke-linecap="round"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="2"/><path d="M2.2 6.6h11.6M5.6 1.9v2.5M10.4 1.9v2.5"/></svg>
-            </button>
+        <button class="btn sm ghost" id="f-date" title="按创建时间或最后修改时间筛选">时间</button>
+        <div class="dfmenu" id="datemenu" hidden>
+          <div class="dfsec">
+            <div class="dfhead"><span>创建时间</span><button class="dfx" id="f-cre-clear" type="button" hidden>清除</button></div>
+            <div class="dfrow">
+              <input type="text" id="f-cre-from" class="dfin" placeholder="开始日期" maxlength="12" autocomplete="off">
+              <button class="dpbtn" type="button" id="dp-cre-from" data-dp-open="cre-from" title="选择开始日期" aria-label="选择开始日期">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                  stroke-linecap="round"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="2"/><path d="M2.2 6.6h11.6M5.6 1.9v2.5M10.4 1.9v2.5"/></svg>
+              </button>
+            </div>
+            <div class="dfrow">
+              <input type="text" id="f-cre-to" class="dfin" placeholder="结束日期" maxlength="12" autocomplete="off">
+              <button class="dpbtn" type="button" id="dp-cre-to" data-dp-open="cre-to" title="选择结束日期" aria-label="选择结束日期">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                  stroke-linecap="round"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="2"/><path d="M2.2 6.6h11.6M5.6 1.9v2.5M10.4 1.9v2.5"/></svg>
+              </button>
+            </div>
           </div>
-          <div class="dfrow">
-            <input type="text" id="f-mod-to" class="dfin" placeholder="结束日期" maxlength="12" autocomplete="off">
-            <button class="dpbtn" type="button" id="dp-mod-to" data-dp-open="mod-to" title="选择结束日期" aria-label="选择结束日期">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
-                stroke-linecap="round"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="2"/><path d="M2.2 6.6h11.6M5.6 1.9v2.5M10.4 1.9v2.5"/></svg>
-            </button>
+          <div class="dfsec">
+            <div class="dfhead"><span>最后修改时间</span><button class="dfx" id="f-mod-clear" type="button" hidden>清除</button></div>
+            <div class="dfrow">
+              <input type="text" id="f-mod-from" class="dfin" placeholder="开始日期" maxlength="12" autocomplete="off">
+              <button class="dpbtn" type="button" id="dp-mod-from" data-dp-open="mod-from" title="选择开始日期" aria-label="选择开始日期">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                  stroke-linecap="round"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="2"/><path d="M2.2 6.6h11.6M5.6 1.9v2.5M10.4 1.9v2.5"/></svg>
+              </button>
+            </div>
+            <div class="dfrow">
+              <input type="text" id="f-mod-to" class="dfin" placeholder="结束日期" maxlength="12" autocomplete="off">
+              <button class="dpbtn" type="button" id="dp-mod-to" data-dp-open="mod-to" title="选择结束日期" aria-label="选择结束日期">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+                  stroke-linecap="round"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="2"/><path d="M2.2 6.6h11.6M5.6 1.9v2.5M10.4 1.9v2.5"/></svg>
+              </button>
+            </div>
           </div>
-          <div class="dfacts">
-            <button class="btn sm ghost" id="f-mod-clear" type="button">清除</button>
+          <div class="dpacts">
+            <button class="btn sm ghost" id="f-date-clear" type="button">全部清除</button>
           </div>
         </div>
       </div>

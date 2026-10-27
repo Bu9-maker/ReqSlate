@@ -45,6 +45,8 @@ let state = {
   filter: 'all',
   modFrom: '',         // 最后修改时间的起止，空串=不限；都是 YYYY-MM-DD
   modTo: '',
+  creFrom: '',         // 创建时间的起止，同上
+  creTo: '',
   owner: ''            // 只看某个负责人，空串=不限
 };
 
@@ -248,26 +250,37 @@ function isOverdue(it) {
   return it.status !== 'done' && !!it.due && it.due < today();
 }
 
-/* 最后修改时间（updatedAt，形如 2026-10-27 23:04:12）落在 [modFrom, modTo] 之内。
-   两端都含：选「10-01 到 10-31」时，10-31 当天 23:59 改的也要算进来，
+/* 时间落在 [from, to] 之内。库里存的是 2026-10-27 23:04:12，
+   两端都含：选「10-01 到 10-31」时，10-31 当天 23:59 的也要算进来，
    所以只比日期部分，不比时刻。任一端留空就是不限那一端。 */
-function inModRange(it) {
-  const from = state.modFrom;
-  const to = state.modTo;
+function inDayRange(value, from, to) {
   if (!from && !to) return true;
-  const day = String(it.updatedAt || '').slice(0, 10);
+  const day = String(value || '').slice(0, 10);
   if (!day) return false;
   if (from && day < from) return false;
   if (to && day > to) return false;
   return true;
 }
 
+function inModRange(it) {
+  return inDayRange(it.updatedAt, state.modFrom, state.modTo);
+}
+
+function inCreRange(it) {
+  return inDayRange(it.createdAt, state.creFrom, state.creTo);
+}
+
 function hasModFilter() {
   return !!(state.modFrom || state.modTo);
 }
 
+function hasCreFilter() {
+  return !!(state.creFrom || state.creTo);
+}
+
 function matchFilter(it) {
   if (!inModRange(it)) return false;
+  if (!inCreRange(it)) return false;
   if (state.owner && (it.owner || '').trim() !== state.owner) return false;
   const f = state.filter;
   if (!f || f === 'all') return true;
@@ -284,10 +297,11 @@ function renderOwnerFilter() {
     .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
 
   // 当前选的人如果已经被改掉/删干净了，就退回「全部负责人」
-  if (state.owner && !names.includes(state.owner)) state.owner = '';
+  let reset = false;
+  if (state.owner && !names.includes(state.owner)) { state.owner = ''; reset = true; }
 
   const want = JSON.stringify(names) + '|' + state.owner;
-  if (sel._sig === want) return;
+  if (sel._sig === want) return reset;
   sel._sig = want;
 
   sel.innerHTML = [
@@ -295,6 +309,7 @@ function renderOwnerFilter() {
     ...names.map((n) => `<option value="${esc(n)}"${state.owner === n ? ' selected' : ''}>${esc(n)}</option>`)
   ].join('');
   sel.classList.toggle('on', !!state.owner);
+  return reset;
 }
 
 /* 日期框下面那行小字：日期本身已经显示在框里了，这里只说「还剩几天」，
@@ -339,11 +354,11 @@ function badgesHTML(it) {
   return od ? '<span class="badge overdue">逾期</span>' : '';
 }
 
-/* 最后修改时间：库里存的是 2026-10-27 23:04:12，界面上只显示到分钟，
-   秒对人没有意义。创建时它就是创建时间（后端 insert 用的是同一个 ts）。 */
-function modTimeText(it) {
-  const s = String(it.updatedAt || '');
-  return s ? s.slice(0, 16) : '';
+/* 时间戳：库里存的是 2026-10-27 23:04:12，界面上只显示到分钟，
+   秒对人没有意义。创建时创建时间就等于最后修改时间（后端 insert 用的是同一个 ts）。 */
+function timeText(s) {
+  const v = String(s || '');
+  return v ? v.slice(0, 16) : '';
 }
 
 function historyHTML(it) {
@@ -487,9 +502,15 @@ function itemHTML(it) {
               <div class="fval">${grpSelect(it, dis)}</div>
             </div>
             <div class="fblock">
+              <label class="flabel">创建时间</label>
+              <div class="fval">
+                <span class="modtime createtime" data-cre="${it.id}" title="这条任务新建的时间">${esc(timeText(it.createdAt) || '—')}</span>
+              </div>
+            </div>
+            <div class="fblock">
               <label class="flabel">最后修改</label>
               <div class="fval">
-                <span class="modtime" data-mod="${it.id}" title="这条任务最后一次变动的时间；新建时等于创建时间">${esc(modTimeText(it) || '—')}</span>
+                <span class="modtime" data-mod="${it.id}" title="这条任务最后一次变动的时间；新建时等于创建时间">${esc(timeText(it.updatedAt) || '—')}</span>
               </div>
             </div>
           </div>
@@ -552,7 +573,7 @@ function renderItems() {
 
   const box = $('#items');
   const keep = new Set(list.map((x) => x.id));
-  const plain = !q && !hasModFilter() && !state.owner && (state.filter === 'all' || !state.filter);
+  const plain = !q && !hasModFilter() && !hasCreFilter() && !state.owner && (state.filter === 'all' || !state.filter);
 
   const groups = buildGroups()
     .map((g) => ({ ...g, items: g.items.filter((x) => keep.has(x.id)) }))
@@ -560,10 +581,17 @@ function renderItems() {
   lastGroups = groups;
 
   if (!groups.length) {
-    box.innerHTML = `<div class="empty-state">${
-      state.items.length ? '没有符合筛选条件的任务。' : '还没有任务。点右上角「＋ 新增任务」开始。'
-    }</div>`;
-    renderNav([]);
+    // 筛不出东西时，目录仍要显示全部分类：否则侧边栏会写「暂无分类」，
+    // 看起来像数据没了，其实只是筛选条件太窄。
+    if (state.items.length) {
+      box.innerHTML = '<div class="empty-state">没有符合筛选条件的任务。<button class="linkbtn" id="clearf">清除筛选</button></div>';
+      const cb = $('#clearf');
+      if (cb) cb.addEventListener('click', () => { clearFilters(); renderItems(); });
+      renderNav(buildGroups());
+    } else {
+      box.innerHTML = '<div class="empty-state">还没有任务。点右上角「＋ 新增任务」开始。</div>';
+      renderNav([]);
+    }
     return;
   }
 
@@ -1219,15 +1247,16 @@ function fileToDataURL(file) {
    立刻被筛掉，界面上什么都看不到，像没建成功一样。
    清完还要把「任务总数」这张卡片重新点亮（filter 回到 all）。 */
 function clearFilters() {
-  const had = state.filter !== 'all' || hasModFilter() || state.owner || ($('#f-q').value || '').trim();
+  const had = state.filter !== 'all' || hasModFilter() || hasCreFilter() || state.owner || ($('#f-q').value || '').trim();
   state.filter = 'all';
   state.modFrom = '';
   state.modTo = '';
+  state.creFrom = '';
+  state.creTo = '';
   state.owner = '';
   $('#f-q').value = '';
-  $('#f-mod-from').value = '';
-  $('#f-mod-to').value = '';
-  syncModFilterUI();
+  ['#f-mod-from', '#f-mod-to', '#f-cre-from', '#f-cre-to'].forEach((s) => { const el = $(s); if (el) el.value = ''; });
+  syncAllDateFilters();
   const sel = $('#f-owner');
   if (sel) { sel._sig = ''; renderOwnerFilter(); }
   renderSummary();
@@ -1528,6 +1557,10 @@ async function saveField(id, field, value, oldValue) {
     renderSummary();
     refreshItemChrome(cur);
 
+    /* 改了负责人，工具条上那个下拉的选项就得跟着变——不然刚填的新名字
+       要等刷新页面才出现，等于白填。改了别的字段也过一遍，反正有 _sig 挡着。 */
+    if (renderOwnerFilter()) renderItems();
+
     if (field === 'title') {
       const navBtn = document.querySelector(`.navitem[data-nid="${cur.id}"] .ntxt`);
       if (navBtn) navBtn.textContent = cur.title || '（未填内容）';
@@ -1544,6 +1577,7 @@ async function saveField(id, field, value, oldValue) {
       state.stats = statsOf(state.items);
       renderSummary();
       renderItems();
+      renderOwnerFilter();
       toast(e.message);
       return;
     }
@@ -1574,9 +1608,11 @@ function refreshItemChrome(it) {
   if (prog) prog.classList.toggle('hit', !!it.progressToday);
   el.classList.toggle('overdue', isOverdue(it));
 
-  // 最后修改时间也要立刻跟上，不必等整页重载
-  const mt = el.querySelector('.modtime');
-  if (mt) mt.textContent = modTimeText(it) || '—';
+  // 两个时间都要立刻跟上，不必等整页重载
+  const mt = el.querySelector('.modtime[data-mod]');
+  if (mt) mt.textContent = timeText(it.updatedAt) || '—';
+  const ct = el.querySelector('.createtime');
+  if (ct) ct.textContent = timeText(it.createdAt) || '—';
 }
 
 /* ---------------- 顶部新增任务：弹表单，分类名与任务内容都预填 ---------------- */
@@ -1868,83 +1904,123 @@ $('#collapseAll').addEventListener('click', () => {
   renderItems();
 });
 
-/* ---------------- 最后修改时间筛选 ---------------- */
+/* ---------------- 时间筛选（创建时间 / 最后修改时间） ---------------- */
 
-const dfMenu = $('#dfmenu');
+/* 两套筛选长得一模一样、行为也一样，差别只在绑哪个 state 字段。
+   写成一个描述表，比复制两遍代码省事，也不会改一处漏一处。
+   两块共用同一个下拉面板，否则工具条上要挤两个按钮。 */
+const DATE_FILTERS = [
+  {
+    key: 'cre', clear: '#f-cre-clear',
+    from: '#f-cre-from', to: '#f-cre-to', label: '创建时间',
+    get: () => [state.creFrom, state.creTo],
+    set: (f, t) => { state.creFrom = f; state.creTo = t; },
+    on: hasCreFilter
+  },
+  {
+    key: 'mod', clear: '#f-mod-clear',
+    from: '#f-mod-from', to: '#f-mod-to', label: '最后修改时间',
+    get: () => [state.modFrom, state.modTo],
+    set: (f, t) => { state.modFrom = f; state.modTo = t; },
+    on: hasModFilter
+  }
+];
 
-/* 按钮和两个输入框都按 state 重画一遍。用 state 当唯一真相，
+const dateMenu = $('#datemenu');
+const dateBtn = $('#f-date');
+
+/* 输入框和「清除」小链接按 state 重画一遍。用 state 当唯一真相，
    免得输入框里的字和实际生效的条件对不上（比如日期非法被拒之后）。 */
-function syncModFilterUI() {
-  const from = $('#f-mod-from');
-  const to = $('#f-mod-to');
-  const btn = $('#f-mod');
-  if (from && from.value !== state.modFrom) from.value = state.modFrom;
-  if (to && to.value !== state.modTo) to.value = state.modTo;
-  if (!btn) return;
-
-  const on = hasModFilter();
-  btn.classList.toggle('on', on);
-  if (!on) { btn.textContent = '修改时间'; return; }
-  const f = state.modFrom ? state.modFrom.slice(5) : '不限';
-  const t = state.modTo ? state.modTo.slice(5) : '不限';
-  btn.textContent = `修改时间 ${f} ~ ${t}`;
+function syncDateFilterUI(f) {
+  const from = $(f.from);
+  const to = $(f.to);
+  const [fromV, toV] = f.get();
+  if (from && from.value !== fromV) from.value = fromV;
+  if (to && to.value !== toV) to.value = toV;
+  const clear = $(f.clear);
+  if (clear) clear.hidden = !f.on();
 }
 
-function applyModFilter() {
-  const f = parseDate($('#f-mod-from').value);
-  const t = parseDate($('#f-mod-to').value);
+function syncAllDateFilters() {
+  DATE_FILTERS.forEach(syncDateFilterUI);
+  if (!dateBtn) return;
+
+  // 按钮上只报个数：具体区间太长，写进按钮会把关键词框和负责人下拉挤走，
+  // 想知道是哪段区间点开面板看就行。
+  const n = DATE_FILTERS.filter((f) => f.on()).length;
+  dateBtn.classList.toggle('on', n > 0);
+  dateBtn.textContent = n ? `时间 · ${n}` : '时间';
+}
+
+function applyDateFilter(f) {
+  const from = parseDate($(f.from).value);
+  const to = parseDate($(f.to).value);
   // parseDate 的三种返回：'' 清空、null 非法、'YYYY-MM-DD' 正常
   // 输入不合法时把框里的字退回去，免得框里写着一个没生效的日期
-  if (f === null) { toast('开始日期格式不对，请写成 2026-10-01'); syncModFilterUI(); return; }
-  if (t === null) { toast('结束日期格式不对，请写成 2026-10-31'); syncModFilterUI(); return; }
-  if (f && t && f > t) { toast('开始日期不能晚于结束日期'); syncModFilterUI(); return; }
-  state.modFrom = f;
-  state.modTo = t;
-  syncModFilterUI();
+  if (from === null) { toast('开始日期格式不对，请写成 2026-10-01'); syncDateFilterUI(f); return; }
+  if (to === null) { toast('结束日期格式不对，请写成 2026-10-31'); syncDateFilterUI(f); return; }
+  if (from && to && from > to) { toast('开始日期不能晚于结束日期'); syncDateFilterUI(f); return; }
+  f.set(from, to);
+  syncAllDateFilters();
   renderItems();
 }
 
-$('#f-mod').addEventListener('click', (e) => {
-  e.stopPropagation();
-  if (!dfMenu) return;
-  dfMenu.hidden = !dfMenu.hidden;
-  if (!dfMenu.hidden) syncModFilterUI();
-});
-
-/* 点到别处收起菜单。点日期选择器不算「别处」——它是 fixed 定位、挂在 body 上，
-   不排除的话一选日期菜单就跟着关了。 */
-document.addEventListener('mousedown', (e) => {
-  if (!dfMenu || dfMenu.hidden) return;
-  if (dfMenu.contains(e.target)) return;
-  if (e.target.closest && (e.target.closest('#f-mod') || e.target.closest('#dpicker'))) return;
-  dfMenu.hidden = true;
-});
-
-/* 两个日期框：手输 + 日历按钮，改完立刻生效 */
-[['dp-mod-from', '#f-mod-from'], ['dp-mod-to', '#f-mod-to']].forEach(([btnId, sel]) => {
-  const btn = document.getElementById(btnId);
-  const inp = $(sel);
-  if (!btn || !inp) return;
-
-  inp._commit = applyModFilter;          // 日历选完直接提交
-  btn.addEventListener('click', (e) => {
+if (dateBtn && dateMenu) {
+  dateBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (dp.input === inp) { dpClose(); return; }
-    dpOpen(inp);
+    dateMenu.hidden = !dateMenu.hidden;
+    if (!dateMenu.hidden) syncAllDateFilters();
   });
-  inp.addEventListener('blur', applyModFilter);
-  inp.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+
+  // 点到别处收起面板。点日期选择器不算「别处」——它是 fixed 定位、挂在 body 上，
+  // 不排除的话一选日期面板就跟着关了。
+  document.addEventListener('mousedown', (e) => {
+    if (dateMenu.hidden) return;
+    if (dateMenu.contains(e.target)) return;
+    if (e.target.closest && (e.target.closest('#f-date') || e.target.closest('#dpicker'))) return;
+    dateMenu.hidden = true;
   });
+}
+
+DATE_FILTERS.forEach((f) => {
+  // 两个日期框：手输 + 日历按钮，改完立刻生效
+  [['#dp-' + f.key + '-from', f.from], ['#dp-' + f.key + '-to', f.to]].forEach(([btnSel, inpSel]) => {
+    const dpBtn = $(btnSel);
+    const inp = $(inpSel);
+    if (!dpBtn || !inp) return;
+
+    inp._commit = () => applyDateFilter(f);   // 日历选完直接提交
+    dpBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (dp.input === inp) { dpClose(); return; }
+      dpOpen(inp);
+    });
+    inp.addEventListener('blur', () => applyDateFilter(f));
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    });
+  });
+
+  const clr = $(f.clear);
+  if (clr) {
+    clr.addEventListener('click', (e) => {
+      e.stopPropagation();
+      f.set('', '');
+      syncAllDateFilters();
+      renderItems();
+    });
+  }
 });
 
-$('#f-mod-clear').addEventListener('click', (e) => {
-  e.stopPropagation();
-  state.modFrom = '';
-  state.modTo = '';
-  syncModFilterUI();
-  renderItems();
-});
+const dateClear = $('#f-date-clear');
+if (dateClear) {
+  dateClear.addEventListener('click', (e) => {
+    e.stopPropagation();
+    DATE_FILTERS.forEach((f) => f.set('', ''));
+    syncAllDateFilters();
+    renderItems();
+  });
+}
 
 /* ---------------- 回到顶部 ---------------- */
 

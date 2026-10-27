@@ -20,7 +20,7 @@ const PASSWORD = process.env.ADMIN_PASSWORD || 'ci-pass';
    早点报错比让 CI 干等好定位。 */
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 10000);
 /* 连续这么多次请求都没响应，说明服务不是偶发慢，而是整体卡住了。
-   继续往下跑只会一项项等超时（72 项 × 10 秒 = 12 分钟），不如立刻收工。 */
+   继续往下跑只会一项项等超时（70 多项 × 10 秒 = 十几分钟），不如立刻收工。 */
 const MAX_CONSECUTIVE_TIMEOUTS = 3;
 let consecutiveTimeouts = 0;
 
@@ -163,6 +163,11 @@ let groupName = '';
     payload.json?.items?.every((x) => typeof x.updatedAt === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(x.updatedAt)),
     `实际 ${JSON.stringify((payload.json?.items || []).map((x) => x.updatedAt))}`);
 
+  /* 创建时间同理：界面上「创建时间」筛选靠它，缺了也是静默不筛。 */
+  ok('任务都带 createdAt',
+    payload.json?.items?.every((x) => typeof x.createdAt === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(x.createdAt)),
+    `实际 ${JSON.stringify((payload.json?.items || []).map((x) => x.createdAt))}`);
+
   const g = await call('POST', `/api/p/${token}/groups`, { body: {} });
   ok('新建分类返回自动生成的名称', g.status === 200 && !!g.json?.name);
   groupName = g.json?.name || '';
@@ -273,6 +278,12 @@ section('5. 导出与模板');
   ok('导出 csv 返回 200', csv.status === 200);
   ok('csv 带 UTF-8 BOM（Excel 不乱码）',
     csv.buf[0] === 0xef && csv.buf[1] === 0xbb && csv.buf[2] === 0xbf, `头三字节 ${csv.buf.slice(0, 3).join(',')}`);
+  /* 表头要同时有「创建时间」和「最后修改时间」两列，顺序也是界面上那个顺序。 */
+  const csvHead = csv.text.replace(/^\uFEFF/, '').split('\n')[0];
+  ok('csv 表头含创建时间与最后修改时间',
+    csvHead.includes('创建时间') && csvHead.includes('最后修改时间') &&
+    csvHead.indexOf('创建时间') < csvHead.indexOf('最后修改时间'),
+    `实际表头 ${csvHead}`);
 
   const md = await call('GET', `/api/p/${token}/export.md`);
   ok('导出 markdown 返回 200', md.status === 200);
@@ -294,6 +305,10 @@ section('5. 导出与模板');
   ok('jsonl 每一行都是合法 JSON', allJson);
   ok('jsonl 首行是项目概要且带 stats', firstIsProject);
   ok('jsonl 含 2 条任务', itemCount === 2, `实际 ${itemCount}`);
+  /* 给模型读的那份也要带创建时间，否则模型分不清「新提的」和「刚改过的」。 */
+  const firstItem = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .find((o) => o && o.type === 'item');
+  ok('jsonl 的任务带 createdAt', typeof firstItem?.createdAt === 'string', `实际 ${firstItem?.createdAt}`);
 
   const tpl = await call('GET', `/api/p/${token}/template.xlsx`);
   ok('下载导入模板返回 200', tpl.status === 200);

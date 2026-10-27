@@ -761,9 +761,10 @@ const deleteImageFile = (projToken, file) => {
 
 /* 导出的列。序号也导出去，人看着方便；导回来时序号不采信，
    一律按分类重新编，免得外部改乱了导致同号。 */
-const XLSX_HEADER = ['分类', '序号', '任务内容', '补充说明', '进展情况', '负责人', '完成期限', '状态', '最后修改时间'];
+const XLSX_HEADER = ['分类', '序号', '任务内容', '补充说明', '进展情况', '负责人', '完成期限', '状态', '创建时间', '最后修改时间'];
 
-/* 导入时认这些列名（大小写、全半角不管，去空格后比） */
+/* 导入时认这些列名（大小写、全半角不管，去空格后比）。
+   两个时间列都认，但导入时都不采信：新建任务的时间一律以导入那一刻为准。 */
 const IMPORT_COLUMNS = {
   grp: ['分类', '所属分类', '分组', '分类名', 'group', 'grp'],
   seq: ['序号', 'seq'],
@@ -773,6 +774,7 @@ const IMPORT_COLUMNS = {
   owner: ['负责人', '责任人', 'owner'],
   due: ['完成期限', '期限', '截止日期', '截止时间', 'due', 'deadline'],
   status: ['状态', 'status'],
+  createdAt: ['创建时间', '新建时间', 'createdat'],
   updatedAt: ['最后修改时间', '最后更新', '修改时间', '更新时间', 'updatedat']
 };
 
@@ -784,7 +786,7 @@ const STATUS_ALIAS = {
 
 const MAX_IMPORT_ROWS = 5000;
 
-const rowToArray = (it) => [it.grp || '', it.seq, it.title, it.detail, it.progress, it.owner, it.due, STATUS_CN[it.status] || it.status, it.updatedAt];
+const rowToArray = (it) => [it.grp || '', it.seq, it.title, it.detail, it.progress, it.owner, it.due, STATUS_CN[it.status] || it.status, it.createdAt, it.updatedAt];
 
 /* 一个项目的完整任务表（按分类顺序、分类内序号） */
 function exportRows(projectId) {
@@ -824,7 +826,7 @@ function exportWorkbook(proj) {
       name: '任务清单',
       header: XLSX_HEADER,
       rows: items.map(rowToArray),
-      widths: [18, 6, 34, 40, 40, 16, 13, 9, 19],
+      widths: [18, 6, 34, 40, 40, 16, 13, 9, 19, 19],
       freeze: true,
       filter: true
     },
@@ -919,6 +921,7 @@ function exportJsonl(proj) {
       status: it.status,
       statusText: STATUS_CN[it.status] || it.status,
       overdue: !!(it.due && it.status !== 'done' && it.due < todayStr()),
+      createdAt: it.createdAt,
       updatedAt: it.updatedAt
     }));
   }
@@ -934,11 +937,11 @@ function templateWorkbook() {
       name: '任务清单',
       header: XLSX_HEADER,
       rows: [
-        ['公文流转模块', 1, '收文登记模块', '按来文单位、文号、密级登记，支持扫描件上传', '', '王芳（乙方）', '2026-11-10', '进行中', ''],
-        ['公文流转模块', 2, '发文拟稿模块', '', '已出原型，等甲方确认', '李娜（甲方）', '2026-11-20', '未开始', ''],
-        ['会议管理', 1, '会议通知分发', '支持按参会人批量发通知', '本周联调', '张伟（甲方）', '2026-12-05', '进行中', '']
+        ['公文流转模块', 1, '收文登记模块', '按来文单位、文号、密级登记，支持扫描件上传', '', '王芳', '2026-11-10', '进行中', '', ''],
+        ['公文流转模块', 2, '发文拟稿模块', '', '已出原型，等待确认', '李娜', '2026-11-20', '未开始', '', ''],
+        ['会议管理', 1, '会议通知分发', '支持按参会人批量发通知', '本周联调', '张伟', '2026-12-05', '进行中', '', '']
       ],
-      widths: [18, 6, 34, 40, 40, 16, 13, 9, 19],
+      widths: [18, 6, 34, 40, 40, 16, 13, 9, 19, 19],
       freeze: true,
       filter: true
     },
@@ -951,9 +954,10 @@ function templateWorkbook() {
         ['任务内容', '一句话说清要做什么，最多 200 字。空行的整行会被跳过', '是'],
         ['补充说明', '背景、依据、验收标准等，可以多行', '否'],
         ['进展情况', '当前做到哪一步', '否'],
-        ['负责人', '建议写成「姓名（甲方/乙方）」，方便区分是哪一方', '否'],
+        ['负责人', '填姓名即可，重名可以加部门或备注区分', '否'],
         ['完成期限', '写成 2026-11-10 这样。也认 2026/11/10、2026年11月10日、20261110', '否'],
         ['状态', '只能填：未开始 / 进行中 / 已完成。留空按「未开始」处理', '否'],
+        ['创建时间', '导出时自动带上，导入时忽略：导入的任务以导入那一刻为创建时间', '否'],
         ['最后修改时间', '导出时自动带上，导入时忽略。新建任务时它就等于创建时间', '否']
       ],
       widths: [12, 70, 6]
