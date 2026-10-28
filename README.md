@@ -100,7 +100,6 @@ ReqSlate/
 ├── xlsx.js                # 自写的 Excel 读写（zip + XML）
 ├── config.json            # 界面文案
 ├── README.md              # 本文件
-├── 使用手册.md            # 日常用法与部署
 ├── CHANGELOG.md           # 每个版本改了什么
 ├── docs/                  # 本文件引用的截图
 ├── .github/               # 冒烟测试与 CI/Release 工作流
